@@ -13,11 +13,12 @@ set -u
 # Chemins calculés depuis le script afin de permettre un lancement depuis
 # n'importe quel répertoire.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/validation.env"
+TOOLS_DIR="${SCRIPT_DIR}/../msm-projet-06-autres/ops"
+source "${TOOLS_DIR}/validation.env"
 RESULTS_DIR="${SCRIPT_DIR}/test-results"
 
 # Active un rapport d'exécution distinct des rapports JUnit des frameworks.
-source "${SCRIPT_DIR}/reporting.sh"
+source "${TOOLS_DIR}/reporting.sh"
 init_report "tests-validation" "Tests backend et frontend"
 
 log() {
