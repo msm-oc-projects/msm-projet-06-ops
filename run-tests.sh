@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-set -u
 
-# Lance les tests des projets frères sans coder en dur leur technologie.
+# Exécuteur autonome des tests unitaires backend et frontend.
 #
 # Règles de détection :
 # - package.json  -> projet npm ;
@@ -9,18 +8,39 @@ set -u
 #
 # Les rapports JUnit XML sont regroupés sous test-results/ afin de fournir un
 # emplacement unique pour la CI et pour l'analyse manuelle.
+#
+# Utilisation :
+#   ./run-tests.sh
+#   TEST_PROJECT_NAMES=msm-projet-06-backend ./run-tests.sh
+#   TEST_PROJECT_NAMES=msm-projet-06-frontend ./run-tests.sh
+#
+# Variables :
+# - `PROJECT_ROOT` : dossier parent des dépôts frères ;
+# - `BACKEND_PROJECT_NAME` et `FRONTEND_PROJECT_NAME` : noms des dépôts ;
+# - `TEST_PROJECT_NAMES` : liste séparée par des espaces des projets à tester.
+#
+# Comportement :
+# - installe les dépendances npm uniquement si `node_modules` est absent ;
+# - privilégie toujours le wrapper Gradle du projet ;
+# - continue avec le second projet lorsque le premier échoue ;
+# - exige au moins un rapport JUnit XML par projet testé ;
+# - retourne 1 si un projet échoue ou si aucun projet n'est détecté.
+#
+# `set -u` transforme toute variable non initialisée en erreur. `set -e` n'est
+# volontairement pas utilisé car le script doit collecter les échecs des deux
+# projets avant de produire son bilan.
+set -u
 
 # Chemins calculés depuis le script afin de permettre un lancement depuis
 # n'importe quel répertoire.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOLS_DIR="${SCRIPT_DIR}/../msm-projet-06-autres/ops"
-source "${TOOLS_DIR}/validation.env"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+BACKEND_PROJECT_NAME="${BACKEND_PROJECT_NAME:-msm-projet-06-backend}"
+FRONTEND_PROJECT_NAME="${FRONTEND_PROJECT_NAME:-msm-projet-06-frontend}"
+TEST_PROJECT_NAMES="${TEST_PROJECT_NAMES:-${BACKEND_PROJECT_NAME} ${FRONTEND_PROJECT_NAME}}"
 RESULTS_DIR="${SCRIPT_DIR}/test-results"
 
-# Active un rapport d'exécution distinct des rapports JUnit des frameworks.
-source "${TOOLS_DIR}/reporting.sh"
-init_report "tests-validation" "Tests backend et frontend"
-
+# Tous les messages portent un préfixe stable, pratique dans les logs CI.
 log() {
   printf '[run-tests] %s\n' "$*"
 }
@@ -35,7 +55,7 @@ require_command() {
   local command_name="$1"
 
   if ! command -v "${command_name}" >/dev/null 2>&1; then
-    log "ERROR: required command not found: ${command_name}"
+    log "ERREUR : commande requise introuvable : ${command_name}"
     return 1
   fi
 
@@ -77,7 +97,7 @@ run_npm_tests() {
   local status
 
   project_name="$(basename "${project_dir}")"
-  log "${project_name}: detected npm project"
+  log "${project_name} : projet npm détecté"
 
   require_command npm || return 1
 
@@ -86,11 +106,11 @@ run_npm_tests() {
   # les mêmes versions en local et en CI.
   if [ ! -d "${project_dir}/node_modules" ]; then
     if [ ! -f "${project_dir}/package-lock.json" ]; then
-      log "ERROR: ${project_name}: node_modules is missing and package-lock.json was not found"
+      log "ERREUR : ${project_name} : node_modules absent et package-lock.json introuvable"
       return 1
     fi
 
-    log "${project_name}: installing dependencies with npm ci"
+    log "${project_name} : installation des dépendances avec npm ci"
     (cd "${project_dir}" && npm ci --cache .npm --prefer-offline) || return $?
   fi
 
@@ -98,18 +118,18 @@ run_npm_tests() {
 
   # Supprime uniquement les rapports Karma précédents, puis lance la commande
   # définie par le projet. Le code de sortie est conservé avant la copie.
-  log "${project_name}: running npm test"
+  log "${project_name} : exécution de npm test"
   (cd "${project_dir}" && npm test)
   status=$?
 
   report_count="$(copy_xml_reports "${project_dir}/reports" "${RESULTS_DIR}/${project_name}")"
   if [ "${report_count}" -eq 0 ]; then
-    log "ERROR: ${project_name}: no JUnit XML report found in reports/"
+    log "ERREUR : ${project_name} : aucun rapport JUnit XML trouvé dans reports/"
     [ "${status}" -ne 0 ] && return "${status}"
     return 1
   fi
 
-  log "${project_name}: copied ${report_count} JUnit XML report(s)"
+  log "${project_name} : ${report_count} rapport(s) JUnit XML copié(s)"
   return "${status}"
 }
 
@@ -122,7 +142,7 @@ run_gradle_tests() {
   local status
 
   project_name="$(basename "${project_dir}")"
-  log "${project_name}: detected Gradle project"
+  log "${project_name} : projet Gradle détecté"
 
   require_command java || return 1
 
@@ -136,25 +156,25 @@ run_gradle_tests() {
   elif command -v gradle >/dev/null 2>&1; then
     gradle_cmd=("gradle" "clean" "test" "--no-daemon")
   else
-    log "ERROR: ${project_name}: neither Gradle wrapper nor gradle command was found"
+    log "ERREUR : ${project_name} : aucun wrapper Gradle ni commande gradle disponible"
     return 1
   fi
 
   rm -rf "${project_dir}/build/test-results"
 
   # Nettoie les anciens résultats avant d'exécuter la suite JUnit Platform.
-  log "${project_name}: running ${gradle_cmd[*]}"
+  log "${project_name} : exécution de ${gradle_cmd[*]}"
   (cd "${project_dir}" && "${gradle_cmd[@]}")
   status=$?
 
   report_count="$(copy_xml_reports "${project_dir}/build/test-results/test" "${RESULTS_DIR}/${project_name}")"
   if [ "${report_count}" -eq 0 ]; then
-    log "ERROR: ${project_name}: no JUnit XML report found in build/test-results/test/"
+    log "ERREUR : ${project_name} : aucun rapport JUnit XML trouvé dans build/test-results/test/"
     [ "${status}" -ne 0 ] && return "${status}"
     return 1
   fi
 
-  log "${project_name}: copied ${report_count} JUnit XML report(s)"
+  log "${project_name} : ${report_count} rapport(s) JUnit XML copié(s)"
   return "${status}"
 }
 
@@ -175,16 +195,15 @@ run_project_tests() {
   fi
 
   if [ "${status}" -ne 0 ]; then
-    log "$(basename "${project_dir}"): tests failed with exit code ${status}"
+    log "$(basename "${project_dir}") : tests en échec avec le code ${status}"
     failures=$((failures + 1))
   else
-    log "$(basename "${project_dir}"): tests passed"
+    log "$(basename "${project_dir}") : tests réussis"
   fi
 }
 
 clean_previous_results
 
-report_step "Detection et execution des tests"
 found_projects=0
 # Seuls les dossiers frères msm-projet-06-* sont parcourus. Le dépôt Ops ne
 # possède ni package.json ni build.gradle et n'est donc pas traité comme app.
@@ -201,15 +220,14 @@ done
 # Aucun projet détecté signifie généralement que les trois dépôts ne sont pas
 # placés côte à côte comme attendu.
 if [ "${found_projects}" -eq 0 ]; then
-  log "ERROR: no npm or Gradle project found"
+  log "ERREUR : aucun projet npm ou Gradle trouvé"
   exit 1
 fi
 
 # Le script échoue si au moins un projet a échoué, même si l'autre a réussi.
 if [ "${failures}" -ne 0 ]; then
-  log "completed with ${failures} failing project(s)"
+  log "Terminé avec ${failures} projet(s) en échec"
   exit 1
 fi
 
-log "all tests passed; reports are available in ${RESULTS_DIR}"
-report_step "Tests termines"
+log "Tous les tests ont réussi ; rapports disponibles dans ${RESULTS_DIR}"

@@ -1,4 +1,12 @@
+# Le script de tests est exécuté par Bash dans la CI et sous WSL.
 *.sh text eol=lf
+
+# Les fichiers d'environnement chargés par Bash doivent rester en LF.
 *.env text eol=lf
+
+# Documentation normalisée pour éviter les changements de fins de ligne.
 *.md text eol=lf
+
+# Le fichier d'exclusion Git reste stable entre Windows et Linux.
 .gitignore text eol=lf
+.gitattributes text eol=lf
