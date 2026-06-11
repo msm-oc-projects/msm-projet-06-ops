@@ -120,6 +120,81 @@ Sur une branche de test :
 
 Sur une pull request, vérifier que le build réussit sans publication.
 
+## Accéder aux images publiées
+
+Les packages de l'organisation sont visibles à l'adresse :
+
+```text
+https://github.com/orgs/msm-oc-projects/packages
+```
+
+Accès direct aux deux images :
+
+```text
+https://github.com/orgs/msm-oc-projects/packages/container/msm-projet-06-backend
+https://github.com/orgs/msm-oc-projects/packages/container/msm-projet-06-frontend
+```
+
+Chaque page affiche les versions et les tags disponibles, par exemple
+`develop-a1b2c3d`.
+
+## Télécharger une image
+
+Une image publique peut être téléchargée directement :
+
+```bash
+docker pull ghcr.io/msm-oc-projects/msm-projet-06-backend:develop-a1b2c3d
+docker pull ghcr.io/msm-oc-projects/msm-projet-06-frontend:develop-a1b2c3d
+```
+
+Remplacer le tag d'exemple par un tag présent sur la page du package.
+
+Pour une image privée, utiliser un Personal Access Token GitHub disposant de
+la permission `read:packages`. Le token est transmis à Docker par l'entrée
+standard afin de ne pas apparaître dans la commande ou les logs :
+
+```bash
+export CR_PAT=votre-token
+echo "$CR_PAT" | docker login ghcr.io \
+  -u votre-utilisateur-github \
+  --password-stdin
+```
+
+Sous PowerShell :
+
+```powershell
+$env:CR_PAT = "votre-token"
+$env:CR_PAT | docker login ghcr.io `
+  -u votre-utilisateur-github `
+  --password-stdin
+```
+
+Ne jamais écrire le token dans un fichier versionné.
+
+## Exécuter les images
+
+Frontend :
+
+```bash
+docker run --rm -p 8081:80 \
+  ghcr.io/msm-oc-projects/msm-projet-06-frontend:develop-a1b2c3d
+```
+
+L'application est alors disponible sur `http://localhost:8081`.
+
+Le backend nécessite PostgreSQL. Il doit être lancé avec les variables
+`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` et
+`SPRING_DATASOURCE_PASSWORD`, idéalement avec le fichier Compose du dépôt
+backend.
+
+## Supprimer les identifiants locaux
+
+Après utilisation d'un package privé :
+
+```bash
+docker logout ghcr.io
+```
+
 ## Résultat attendu
 
 - le même job `build` fonctionne pour les deux applications ;
@@ -128,4 +203,3 @@ Sur une pull request, vérifier que le build réussit sans publication.
 - le tag identifie clairement la branche et le commit ;
 - les pull requests ne disposent pas d'un accès en écriture au registre ;
 - le cache Buildx accélère les constructions suivantes.
-
