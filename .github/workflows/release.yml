@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  workflow_call:
+    secrets:
+      github_token:
+        required: true
+
+env:
+  NODE_VERSION: "22.14"
+  JAVA_VERSION: "21"
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    name: Create and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect project type
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f package.json ]; then
+            echo "type=npm" >> "$GITHUB_OUTPUT"
+          elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
+            echo "type=gradle" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unsupported project: package.json or build.gradle(.kts) not found." >&2
+            exit 1
+          fi
+
+          if [ ! -f release.config.cjs ]; then
+            echo "release.config.cjs is required." >&2
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://npm.pkg.github.com
+          scope: "@msm-oc-projects"
+
+      - name: Install semantic-release
+        run: |
+          npm install --global \
+            semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @semantic-release/changelog \
+            @semantic-release/exec \
+            @semantic-release/git \
+            @semantic-release/github
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token }}
+        run: semantic-release
+
+      - name: Read released version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f .release-version ]; then
+            version="$(cat .release-version)"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
+            echo "Released version: ${version}"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "No semantic-release version was published."
+          fi
+
+      - name: Install npm dependencies
+        if: steps.release.outputs.published == 'true' && steps.project.outputs.type == 'npm'
+        run: npm ci --cache .npm --prefer-offline
+
+      - name: Publish npm package
+        if: steps.release.outputs.published == 'true' && steps.project.outputs.type == 'npm'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.github_token }}
+        run: npm publish
+
+      - name: Setup Java
+        if: steps.release.outputs.published == 'true' && steps.project.outputs.type == 'gradle'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Publish Maven package
+        if: steps.release.outputs.published == 'true' && steps.project.outputs.type == 'gradle'
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.github_token }}
+        run: |
+          chmod +x gradlew
+          ./gradlew publish --no-daemon
+
+      - name: Compute release image name
+        if: steps.release.outputs.published == 'true'
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image_repository="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "name=${REGISTRY}/${image_repository}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: steps.release.outputs.published == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: steps.release.outputs.published == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.github_token }}
+
+      - name: Build and push release Docker image
+        if: steps.release.outputs.published == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ steps.release.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
