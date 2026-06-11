@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  NODE_VERSION: "20.19"
+  JAVA_VERSION: "21"
+  TEST_RESULTS_DIR: test-results
+
+jobs:
+  test:
+    name: Test application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect project type
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f package.json ]; then
+            if [ ! -f package-lock.json ]; then
+              echo "package-lock.json is required for an npm project." >&2
+              exit 1
+            fi
+
+            echo "type=npm" >> "$GITHUB_OUTPUT"
+            echo "report_dir=reports" >> "$GITHUB_OUTPUT"
+          elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
+            echo "type=gradle" >> "$GITHUB_OUTPUT"
+            echo "report_dir=build/test-results/test" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unsupported project: package.json or build.gradle(.kts) not found." >&2
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        if: steps.project.outputs.type == 'npm'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install npm dependencies
+        if: steps.project.outputs.type == 'npm'
+        run: npm ci --cache .npm --prefer-offline
+
+      - name: Run npm tests
+        if: steps.project.outputs.type == 'npm'
+        run: npm test
+
+      - name: Setup Java
+        if: steps.project.outputs.type == 'gradle'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Run Gradle tests
+        if: steps.project.outputs.type == 'gradle'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f gradlew ]; then
+            echo "The Gradle wrapper is required." >&2
+            exit 1
+          fi
+
+          chmod +x gradlew
+          ./gradlew clean test --no-daemon
+
+      - name: Collect JUnit reports
+        if: always() && steps.project.outcome == 'success'
+        shell: bash
+        env:
+          REPORT_DIR: ${{ steps.project.outputs.report_dir }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$TEST_RESULTS_DIR"
+
+          while IFS= read -r -d '' report; do
+            project_type="${{ steps.project.outputs.type }}"
+            cp "$report" "$TEST_RESULTS_DIR/${project_type}-$(basename "$report")"
+          done < <(find "$REPORT_DIR" -type f -name '*.xml' -print0)
+
+          if ! find "$TEST_RESULTS_DIR" -type f -name '*.xml' -print -quit | grep -q .; then
+            echo "No JUnit XML report was generated." >&2
+            exit 1
+          fi
+
+      - name: Upload JUnit reports
+        if: always() && steps.project.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ steps.project.outputs.type }}-${{ github.run_number }}
+          path: ${{ env.TEST_RESULTS_DIR }}/**/*.xml
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish test report
+        if: always() && steps.project.outcome == 'success'
+        uses: dorny/test-reporter@v2
+        with:
+          name: Unit tests (${{ steps.project.outputs.type }})
+          path: ${{ env.TEST_RESULTS_DIR }}/**/*.xml
+          reporter: java-junit
+          fail-on-error: true
