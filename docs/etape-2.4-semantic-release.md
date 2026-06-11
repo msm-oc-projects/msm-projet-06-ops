@@ -30,7 +30,7 @@ release:
     packages: write
   uses: msm-oc-projects/msm-projet-06-ops/.github/workflows/release.yml@main
   secrets:
-    github_token: ${{ secrets.GITHUB_TOKEN }}
+    release_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 Le release ne s'exécute donc ni sur une branche de développement ni sur une

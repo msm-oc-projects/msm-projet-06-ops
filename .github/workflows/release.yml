@@ -3,7 +3,7 @@ name: Release
 on:
   workflow_call:
     secrets:
-      github_token:
+      release_token:
         required: true
 
 env:
@@ -67,7 +67,7 @@ jobs:
 
       - name: Run semantic-release
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
+          GITHUB_TOKEN: ${{ secrets.release_token }}
         run: semantic-release
 
       - name: Read released version
@@ -93,7 +93,7 @@ jobs:
       - name: Publish npm package
         if: steps.release.outputs.published == 'true' && steps.project.outputs.type == 'npm'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.github_token }}
+          NODE_AUTH_TOKEN: ${{ secrets.release_token }}
         run: npm publish
 
       - name: Setup Java
@@ -108,7 +108,7 @@ jobs:
         if: steps.release.outputs.published == 'true' && steps.project.outputs.type == 'gradle'
         env:
           GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.github_token }}
+          GITHUB_TOKEN: ${{ secrets.release_token }}
         run: |
           chmod +x gradlew
           ./gradlew publish --no-daemon
@@ -133,7 +133,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.github_token }}
+          password: ${{ secrets.release_token }}
 
       - name: Build and push release Docker image
         if: steps.release.outputs.published == 'true'
