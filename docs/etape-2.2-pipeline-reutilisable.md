@@ -7,7 +7,7 @@ Actions réutilisable par les applications Angular et Spring Boot.
 
 ```yaml
 jobs:
-  test:
+  pipeline:
     uses: msm-oc-projects/msm-projet-06-ops/.github/workflows/ci.yml@main
 ```
 
@@ -53,5 +53,5 @@ avec un tag ou un SHA.
 - le même workflow fonctionne dans le backend et le frontend ;
 - seules les étapes correspondant à la technologie détectée sont exécutées ;
 - les dépendances sont mises en cache ;
-- les tests bloquent les jobs suivants en cas d'échec ;
+- les tests bloquent le job de build en cas d'échec ;
 - les rapports JUnit sont disponibles comme artefacts et checks GitHub.
