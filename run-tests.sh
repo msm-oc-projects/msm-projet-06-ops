@@ -20,9 +20,11 @@
 # - `TEST_PROJECT_NAMES` : liste séparée par des espaces des projets à tester.
 #
 # Comportement :
-# - installe les dépendances npm uniquement si `node_modules` est absent ;
+# - réinstalle les dépendances npm avec `npm ci` pour garantir la plateforme et
+#   les versions décrites par le lockfile ;
 # - privilégie toujours le wrapper Gradle du projet ;
 # - continue avec le second projet lorsque le premier échoue ;
+# - signale comme erreur un projet demandé mais absent ;
 # - exige au moins un rapport JUnit XML par projet testé ;
 # - retourne 1 si un projet échoue ou si aucun projet n'est détecté.
 #
@@ -48,6 +50,8 @@ log() {
 # Compte le nombre de projets ayant retourné un échec. Le script continue avec
 # le projet suivant afin de fournir un bilan complet backend + frontend.
 failures=0
+requested_projects=0
+found_projects=0
 
 # Vérifie explicitement les commandes requises et produit un message lisible
 # plutôt que de laisser Bash échouer avec "command not found".
@@ -101,18 +105,16 @@ run_npm_tests() {
 
   require_command npm || return 1
 
-  # Évite un npm ci inutile si node_modules est déjà présent. Lorsqu'une
-  # installation est nécessaire, le lockfile est obligatoire pour garantir
-  # les mêmes versions en local et en CI.
-  if [ ! -d "${project_dir}/node_modules" ]; then
-    if [ ! -f "${project_dir}/package-lock.json" ]; then
-      log "ERREUR : ${project_name} : node_modules absent et package-lock.json introuvable"
-      return 1
-    fi
-
-    log "${project_name} : installation des dépendances avec npm ci"
-    (cd "${project_dir}" && npm ci --cache .npm --prefer-offline) || return $?
+  # Le lockfile est obligatoire : `npm ci` supprime node_modules puis recrée
+  # une installation adaptée au système courant. Cela évite notamment de
+  # réutiliser sous Windows des binaires natifs installés sous WSL, ou inversement.
+  if [ ! -f "${project_dir}/package-lock.json" ]; then
+    log "ERREUR : ${project_name} : package-lock.json introuvable"
+    return 1
   fi
+
+  log "${project_name} : installation reproductible des dépendances avec npm ci"
+  (cd "${project_dir}" && npm ci --cache .npm --prefer-offline) || return $?
 
   rm -rf "${project_dir}/reports"
 
@@ -204,30 +206,38 @@ run_project_tests() {
 
 clean_previous_results
 
-found_projects=0
 # Seuls les dossiers frères msm-projet-06-* sont parcourus. Le dépôt Ops ne
 # possède ni package.json ni build.gradle et n'est donc pas traité comme app.
 for project_name in ${TEST_PROJECT_NAMES}; do
+  requested_projects=$((requested_projects + 1))
   project_dir="${PROJECT_ROOT}/${project_name}"
-  [ -d "${project_dir}" ] || continue
+
+  if [ ! -d "${project_dir}" ]; then
+    log "ERREUR : projet demandé introuvable : ${project_dir}"
+    failures=$((failures + 1))
+    continue
+  fi
 
   if [ -f "${project_dir}/package.json" ] || [ -f "${project_dir}/build.gradle" ]; then
     found_projects=$((found_projects + 1))
     run_project_tests "${project_dir}"
+  else
+    log "ERREUR : ${project_name} : aucun package.json ni build.gradle détecté"
+    failures=$((failures + 1))
   fi
 done
 
-# Aucun projet détecté signifie généralement que les trois dépôts ne sont pas
-# placés côte à côte comme attendu.
-if [ "${found_projects}" -eq 0 ]; then
-  log "ERREUR : aucun projet npm ou Gradle trouvé"
+# Une liste vide est probablement une mauvaise surcharge de TEST_PROJECT_NAMES.
+if [ "${requested_projects}" -eq 0 ]; then
+  log "ERREUR : aucun projet demandé dans TEST_PROJECT_NAMES"
   exit 1
 fi
 
 # Le script échoue si au moins un projet a échoué, même si l'autre a réussi.
 if [ "${failures}" -ne 0 ]; then
-  log "Terminé avec ${failures} projet(s) en échec"
+  log "Bilan : ${found_projects}/${requested_projects} projet(s) détecté(s), ${failures} échec(s)"
   exit 1
 fi
 
+log "Bilan : ${found_projects}/${requested_projects} projet(s) détecté(s), aucun échec"
 log "Tous les tests ont réussi ; rapports disponibles dans ${RESULTS_DIR}"

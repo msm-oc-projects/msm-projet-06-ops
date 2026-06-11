@@ -28,7 +28,59 @@ Pour exécuter les deux suites :
 - Node.js 20 ou plus récent ;
 - npm ;
 - Chrome ou Chromium utilisable par Karma en mode headless ;
-- `package-lock.json` présent dans le frontend si `node_modules` est absent.
+- `package-lock.json` présent dans le frontend.
+
+Le lockfile frontend est désormais obligatoire dans tous les cas, car le
+script exécute systématiquement `npm ci`. Cette réinstallation évite de
+réutiliser des modules natifs créés pour une autre plateforme.
+
+## Exercice 2 - Étape 1
+
+Cette étape demande un script unique capable de détecter la technologie des
+projets, d'exécuter leurs tests et de produire des rapports JUnit XML.
+
+### Checklist des critères
+
+- [x] script Bash unique `run-tests.sh` ;
+- [x] détection automatique avec `package.json` ou `build.gradle` ;
+- [x] exécution de `npm test` pour Angular ;
+- [x] exécution de `./gradlew clean test --no-daemon` pour Spring Boot ;
+- [x] vérification de Java, npm, du wrapper Gradle et du lockfile ;
+- [x] installation reproductible des dépendances avec `npm ci` ;
+- [x] suppression des rapports précédents avant chaque exécution ;
+- [x] collecte centralisée dans `test-results/` ;
+- [x] rapports au format JUnit XML ;
+- [x] poursuite des tests après l'échec d'un premier projet ;
+- [x] code de sortie non nul si un projet échoue ou manque ;
+- [x] rapports directement exploitables par GitHub Actions.
+
+### Résultat attendu
+
+Après une exécution réussie :
+
+```text
+test-results/
+|-- msm-projet-06-backend/
+|   |-- TEST-NotionServiceTest.xml
+|   `-- TEST-WorkshopServiceTest.xml
+`-- msm-projet-06-frontend/
+    `-- TESTS-Chrome_Headless_<version>_<plateforme>.xml
+```
+
+Le dossier est ignoré par Git, car il contient des artefacts générés.
+
+### État de validation
+
+L'Étape 1 de l'Exercice 2 a été validée localement le 11 juin 2026 :
+
+- 2 projets demandés et 2 projets détectés ;
+- 2 tests JUnit backend réussis ;
+- 5 tests Karma/Jasmine frontend réussis ;
+- 2 rapports XML backend collectés ;
+- 1 rapport XML frontend collecté ;
+- 3 rapports confirmés comme XML valides ;
+- code de sortie final `0` ;
+- aucun fichier généré ajouté au suivi Git.
 
 ## Exécuter les tests
 
@@ -90,16 +142,16 @@ Pour Gradle, l'ordre de priorité est :
 
 ## Dépendances frontend
 
-Si `node_modules` existe, le script lance directement les tests.
-
-Si `node_modules` est absent, il exige `package-lock.json`, puis exécute :
+Le script exige `package-lock.json`, puis exécute systématiquement :
 
 ```bash
 npm ci --cache .npm --prefer-offline
 ```
 
 `npm ci` garantit une installation conforme au lockfile. Le cache `.npm`
-réduit les téléchargements lors des exécutions suivantes.
+réduit les téléchargements lors des exécutions suivantes. La suppression et la
+recréation de `node_modules` garantissent aussi que les binaires natifs
+correspondent à la plateforme courante.
 
 ## Rapports JUnit
 
@@ -114,7 +166,7 @@ test-results/
 |   |-- TEST-NotionServiceTest.xml
 |   `-- TEST-WorkshopServiceTest.xml
 `-- msm-projet-06-frontend/
-    `-- karma-results.xml
+    `-- TESTS-Chrome_Headless_<version>_<plateforme>.xml
 ```
 
 Les emplacements sources attendus sont :
@@ -147,6 +199,16 @@ PROJECT_ROOT=/chemin/vers/projet-06 ./run-tests.sh
 |---|---|
 | `0` | Tous les projets détectés ont réussi |
 | `1` | Commande absente, projet introuvable, test en échec ou rapport absent |
+
+Le code de sortie du script peut être contrôlé avec :
+
+```bash
+./run-tests.sh
+echo $?
+```
+
+GitHub Actions considère automatiquement tout code différent de `0` comme un
+échec du job.
 
 ## Dépannage
 
